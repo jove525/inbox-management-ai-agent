@@ -1,0 +1,1087 @@
+{
+  "name": "🤖 Inbox Management Agent v2.0 (Claude Enhanced)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "labelIds": [
+            "UNREAD"
+          ]
+        },
+        "options": {}
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        380
+      ],
+      "notes": "Polls for unread emails every minute"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Spam/Phishing Detection\nconst email = $input.item.json;\nconst text = email.text || '';\nconst subject = email.subject || '';\nconst from = email.from || '';\n\n// Suspicious patterns\nconst spamKeywords = [\n  'verify your account',\n  'suspended account',\n  'click here immediately',\n  'urgent action required',\n  'you have won',\n  'claim your prize',\n  'nigerian prince'\n];\n\nconst suspiciousPatterns = [\n  /password.*reset.*immediate/i,\n  /account.*suspended/i,\n  /verify.*identity.*now/i,\n  /click.*link.*urgent/i\n];\n\n// Check for suspicious patterns\nlet isSpam = false;\nlet spamReason = '';\n\nfor (const keyword of spamKeywords) {\n  if (text.toLowerCase().includes(keyword) || subject.toLowerCase().includes(keyword)) {\n    isSpam = true;\n    spamReason = `Contains spam keyword: ${keyword}`;\n    break;\n  }\n}\n\nif (!isSpam) {\n  for (const pattern of suspiciousPatterns) {\n    if (pattern.test(text) || pattern.test(subject)) {\n      isSpam = true;\n      spamReason = `Matches suspicious pattern: ${pattern}`;\n      break;\n    }\n  }\n}\n\n// Check for suspicious sender patterns\nif (!isSpam && from) {\n  const suspiciousDomains = ['temp-mail.org', 'guerrillamail.com', 'mailinator.com'];\n  const domain = from.split('@')[1];\n  if (suspiciousDomains.some(d => domain && domain.includes(d))) {\n    isSpam = true;\n    spamReason = 'Suspicious sender domain';\n  }\n}\n\nreturn {\n  json: {\n    ...email,\n    spam_check: {\n      is_spam: isSpam,\n      reason: spamReason,\n      checked_at: new Date().toISOString()\n    }\n  }\n};"
+      },
+      "id": "spam-detection",
+      "name": "Spam/Phishing Detection",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        380
+      ],
+      "notes": "Detects spam and phishing attempts before processing"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.spam_check.is_spam }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "spam-gate",
+      "name": "Spam Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        680,
+        380
+      ],
+      "notes": "Routes spam to quarantine, clean emails continue"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "options": {
+          "format": "full"
+        }
+      },
+      "id": "get-email-thread",
+      "name": "Get Email Thread History",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        300
+      ],
+      "notes": "Retrieves full email thread for context"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "threadId": "={{ $json.threadId }}",
+        "options": {
+          "format": "full"
+        }
+      },
+      "id": "get-thread-messages",
+      "name": "Get Thread Messages",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1120,
+        300
+      ],
+      "notes": "Gets all messages in thread for full context"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "select",
+        "table": "sender_history",
+        "filterType": "manual",
+        "filterConditions": {
+          "conditions": [
+            {
+              "column": "email",
+              "operator": "eq",
+              "value": "={{ $json.from }}"
+            }
+          ]
+        }
+      },
+      "id": "lookup-sender-history",
+      "name": "Lookup Sender History",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        460
+      ],
+      "notes": "Checks if sender is VIP or has history"
+    },
+    {
+      "parameters": {
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a sentiment analysis expert. Analyze the following email for emotional tone, urgency, and potential escalation needs.\n\nEmail Subject: {{ $json.subject }}\nEmail From: {{ $json.from }}\nEmail Content: {{ $json.text }}\n\nProvide analysis in JSON format with these fields:\n- sentiment: (positive/neutral/negative/angry)\n- urgency_level: (low/medium/high/critical)\n- emotional_intensity: (1-10 scale)\n- escalation_needed: (true/false)\n- escalation_reason: (string explaining why if escalation_needed is true)\n- detected_issues: (array of strings: frustrated_language, legal_threat, refund_request, aggressive_tone, etc.)\n- confidence_score: (0-100)\n\nOnly output valid JSON, no explanation.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "sentiment-analysis",
+      "name": "Sentiment Analysis (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ],
+      "notes": "Analyzes sentiment and detects escalation triggers"
+    },
+    {
+      "parameters": {
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an email classification expert. Classify the following email into one of these categories:\n\n1. High Priority - Emails from key stakeholders, urgent deadlines, time-sensitive requests\n2. Customer Support - Support tickets, customer inquiries, service requests\n3. Promotions - Marketing emails, newsletters, promotional offers\n4. Finance/Billing - Invoices, payment reminders, billing inquiries\n\nEmail Subject: {{ $json.subject }}\nEmail From: {{ $json.from }}\nEmail Content: {{ $json.text }}\nSender History: {{ $('Lookup Sender History').item.json }}\nSentiment Analysis: {{ $('Sentiment Analysis (Claude)').item.json }}\n\nProvide classification in JSON format:\n- category: (High Priority/Customer Support/Promotions/Finance_Billing)\n- confidence_score: (0-100, be conservative)\n- reasoning: (brief explanation)\n- keywords_found: (array of key terms that influenced decision)\n- recommended_action: (auto_respond/needs_review/escalate)\n\nOnly output valid JSON, no explanation.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "id": "classification-claude",
+      "name": "Classification with Confidence (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        300
+      ],
+      "notes": "Classifies email with confidence scores"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.message.content.confidence_score }}",
+              "operation": "larger",
+              "value2": 90
+            }
+          ],
+          "boolean": [
+            {
+              "value1": "={{ $json.message.content.escalation_needed }}",
+              "value2": false
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "confidence-gate",
+      "name": "Confidence Gate (>90% + No Escalation)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        300
+      ],
+      "notes": "Only proceed with automation if confidence >90% and no escalation flags"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Rate Limiting Check\nconst email = $input.item.json;\nconst threadId = email.threadId;\nconst from = email.from;\n\n// In production, this would check Redis or database\n// For now, we'll use workflow static data or context\nconst maxAutoRepliesPerThread = 3;\nconst maxAutoRepliesPerSender = 10;\n\n// This is a simplified version - in production you'd query your database\nconst threadReplyCount = 0; // TODO: Query from database\nconst senderReplyCount = 0; // TODO: Query from database\n\nconst rateLimitExceeded = threadReplyCount >= maxAutoRepliesPerThread || \n                          senderReplyCount >= maxAutoRepliesPerSender;\n\nreturn {\n  json: {\n    ...email,\n    rate_limit: {\n      thread_reply_count: threadReplyCount,\n      sender_reply_count: senderReplyCount,\n      limit_exceeded: rateLimitExceeded,\n      max_per_thread: maxAutoRepliesPerThread,\n      max_per_sender: maxAutoRepliesPerSender,\n      checked_at: new Date().toISOString()\n    }\n  }\n};"
+      },
+      "id": "rate-limit-check",
+      "name": "Rate Limit Check",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        300
+      ],
+      "notes": "Prevents auto-reply loops (max 3 per thread)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message.content.category }}",
+              "operation": "equals",
+              "value2": "High Priority"
+            }
+          ]
+        }
+      },
+      "id": "route-high-priority",
+      "name": "Route: High Priority",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message.content.category }}",
+              "operation": "equals",
+              "value2": "Customer Support"
+            }
+          ]
+        }
+      },
+      "id": "route-customer-support",
+      "name": "Route: Customer Support",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message.content.category }}",
+              "operation": "equals",
+              "value2": "Promotions"
+            }
+          ]
+        }
+      },
+      "id": "route-promotions",
+      "name": "Route: Promotions",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message.content.category }}",
+              "operation": "equals",
+              "value2": "Finance_Billing"
+            }
+          ]
+        }
+      },
+      "id": "route-finance",
+      "name": "Route: Finance/Billing",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2220,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.id }}",
+        "labelIds": [
+          "NEEDS_REVIEW_HIGH_PRIORITY"
+        ]
+      },
+      "id": "label-high-priority",
+      "name": "Label: High Priority",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2440,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are an executive assistant. Draft a professional response to this high-priority email.\n\nEmail Subject: {{ $('Gmail Trigger').item.json.subject }}\nEmail From: {{ $('Gmail Trigger').item.json.from }}\nEmail Content: {{ $('Gmail Trigger').item.json.text }}\nThread History: {{ $('Get Thread Messages').item.json }}\nSender History: {{ $('Lookup Sender History').item.json }}\n\nProvide response in JSON format:\n- subject: (email subject for reply)\n- message: (professional, concise response)\n- tone: (formal/professional/friendly)\n\nBe professional, empathetic, and solution-oriented. Only output valid JSON.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "draft-high-priority",
+      "name": "Draft High Priority Response (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [
+        2660,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ $json.message.content.subject }}",
+        "message": "={{ $json.message.content.message }}",
+        "options": {}
+      },
+      "id": "create-draft",
+      "name": "Create Draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2880,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "channelId": "YOUR_SLACK_CHANNEL_ID",
+        "text": "=📧 **High Priority Email - Draft Created**\n\n**From:** {{ $('Gmail Trigger').item.json.from }}\n**Subject:** {{ $('Gmail Trigger').item.json.subject }}\n\n**AI Confidence:** {{ $('Classification with Confidence (Claude)').item.json.message.content.confidence_score }}%\n**Sentiment:** {{ $('Sentiment Analysis (Claude)').item.json.message.content.sentiment }}\n\n**Draft Preview:**\n{{ $('Draft High Priority Response (Claude)').item.json.message.content.message }}\n\n[View in Gmail](https://mail.google.com/mail/u/0/#inbox/{{ $('Gmail Trigger').item.json.id }})",
+        "otherOptions": {}
+      },
+      "id": "notify-slack-high-priority",
+      "name": "Notify Slack: High Priority",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        3100,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.id }}",
+        "labelIds": [
+          "CUSTOMER_SUPPORT_PENDING_APPROVAL"
+        ]
+      },
+      "id": "label-customer-support",
+      "name": "Label: Customer Support (Pending)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a customer service representative. Draft a helpful, empathetic response to this support inquiry.\n\nEmail Subject: {{ $('Gmail Trigger').item.json.subject }}\nEmail From: {{ $('Gmail Trigger').item.json.from }}\nEmail Content: {{ $('Gmail Trigger').item.json.text }}\nThread History: {{ $('Get Thread Messages').item.json }}\nSentiment: {{ $('Sentiment Analysis (Claude)').item.json.message.content.sentiment }}\n\nProvide response in JSON format:\n- message: (helpful, empathetic response)\n- alternative_message: (slightly different approach)\n- escalation_recommendation: (should this be escalated to human? true/false)\n\nIf you cannot handle the inquiry, refer to: customersupport@abccorp.com\nBe warm, helpful, and solution-oriented. Only output valid JSON.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "draft-support-response",
+      "name": "Draft Support Response (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [
+        2660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channelId": "YOUR_SLACK_CHANNEL_ID",
+        "text": "=🎫 **Customer Support Email - Approval Required**\n\n**From:** {{ $('Gmail Trigger').item.json.from }}\n**Subject:** {{ $('Gmail Trigger').item.json.subject }}\n\n**AI Confidence:** {{ $('Classification with Confidence (Claude)').item.json.message.content.confidence_score }}%\n**Sentiment:** {{ $('Sentiment Analysis (Claude)').item.json.message.content.sentiment }} (Intensity: {{ $('Sentiment Analysis (Claude)').item.json.message.content.emotional_intensity }}/10)\n\n**Proposed Response:**\n{{ $('Draft Support Response (Claude)').item.json.message.content.message }}\n\n**Alternative Response:**\n{{ $('Draft Support Response (Claude)').item.json.message.content.alternative_message }}\n\n[View in Gmail](https://mail.google.com/mail/u/0/#inbox/{{ $('Gmail Trigger').item.json.id }})",
+        "otherOptions": {},
+        "blocksUi": {
+          "blocksValues": [
+            {
+              "type": "actions",
+              "elements": [
+                {
+                  "type": "button",
+                  "text": "✅ Approve & Send",
+                  "style": "primary",
+                  "actionId": "approve_support_response"
+                },
+                {
+                  "type": "button",
+                  "text": "✏️ Edit & Send",
+                  "actionId": "edit_support_response"
+                },
+                {
+                  "type": "button",
+                  "text": "❌ Reject",
+                  "style": "danger",
+                  "actionId": "reject_support_response"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "id": "slack-approval-support",
+      "name": "Slack Approval: Customer Support",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        2880,
+        300
+      ],
+      "notes": "Requires human approval before sending"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.id }}",
+        "labelIds": [
+          "PROMOTIONS"
+        ]
+      },
+      "id": "label-promotions",
+      "name": "Label: Promotions",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2440,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are evaluating promotional emails. Provide a brief summary and recommendation.\n\nEmail Subject: {{ $('Gmail Trigger').item.json.subject }}\nEmail From: {{ $('Gmail Trigger').item.json.from }}\nEmail Content: {{ $('Gmail Trigger').item.json.text }}\n\nProvide analysis in JSON format:\n- summary: (2-3 sentence summary)\n- recommendation: (worth_reviewing/skip/interesting)\n- value_score: (1-10)\n- key_points: (array of bullet points)\n\nOnly output valid JSON.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.5
+        }
+      },
+      "id": "analyze-promotion",
+      "name": "Analyze Promotion (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [
+        2660,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "channelId": "YOUR_SLACK_CHANNEL_ID",
+        "text": "=🎁 **Promotional Email**\n\n**From:** {{ $('Gmail Trigger').item.json.from }}\n**Subject:** {{ $('Gmail Trigger').item.json.subject }}\n\n**Summary:** {{ $('Analyze Promotion (Claude)').item.json.message.content.summary }}\n\n**Recommendation:** {{ $('Analyze Promotion (Claude)').item.json.message.content.recommendation }}\n**Value Score:** {{ $('Analyze Promotion (Claude)').item.json.message.content.value_score }}/10\n\n**Key Points:**\n{{ $('Analyze Promotion (Claude)').item.json.message.content.key_points.join('\\n') }}\n\n[View in Gmail](https://mail.google.com/mail/u/0/#inbox/{{ $('Gmail Trigger').item.json.id }})",
+        "otherOptions": {}
+      },
+      "id": "notify-slack-promotions",
+      "name": "Notify Slack: Promotions",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        2880,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.id }}",
+        "labelIds": [
+          "FINANCE_BILLING"
+        ]
+      },
+      "id": "label-finance",
+      "name": "Label: Finance/Billing",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2440,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// PII Detection for Finance Emails\nconst email = $input.item.json;\nconst text = email.text || '';\nconst subject = email.subject || '';\n\n// Patterns for PII detection\nconst patterns = {\n  ssn: /\\b\\d{3}-\\d{2}-\\d{4}\\b/g,\n  credit_card: /\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b/g,\n  bank_account: /\\b\\d{8,17}\\b/g,\n  tax_id: /\\b\\d{2}-\\d{7}\\b/g\n};\n\nconst detected = {\n  has_pii: false,\n  types: [],\n  should_redact: false\n};\n\nfor (const [type, pattern] of Object.entries(patterns)) {\n  if (pattern.test(text) || pattern.test(subject)) {\n    detected.has_pii = true;\n    detected.types.push(type);\n  }\n}\n\n// If sensitive PII detected, recommend redaction\nif (detected.types.includes('ssn') || detected.types.includes('credit_card')) {\n  detected.should_redact = true;\n}\n\nreturn {\n  json: {\n    ...email,\n    pii_check: {\n      ...detected,\n      checked_at: new Date().toISOString()\n    }\n  }\n};"
+      },
+      "id": "pii-detection",
+      "name": "PII Detection",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        2660,
+        620
+      ],
+      "notes": "Detects PII before forwarding to finance"
+    },
+    {
+      "parameters": {
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a finance assistant. Summarize this finance/billing email concisely.\n\nEmail Subject: {{ $('Gmail Trigger').item.json.subject }}\nEmail From: {{ $('Gmail Trigger').item.json.from }}\nEmail Content: {{ $('Gmail Trigger').item.json.text }}\n\nProvide summary in JSON format:\n- subject: (clear subject line for finance team)\n- message: (concise summary with key details: amounts, dates, action needed)\n- priority: (low/medium/high)\n- action_required: (yes/no)\n\nOnly output valid JSON.",
+              "role": "user"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "summarize-finance",
+      "name": "Summarize for Finance (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [
+        2880,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "finance@abccorp.com",
+        "subject": "={{ $json.message.content.subject }}",
+        "emailType": "text",
+        "message": "=**Finance/Billing Email Summary**\n\nOriginal From: {{ $('Gmail Trigger').item.json.from }}\nOriginal Subject: {{ $('Gmail Trigger').item.json.subject }}\n\n{{ $json.message.content.message }}\n\nPriority: {{ $json.message.content.priority }}\nAction Required: {{ $json.message.content.action_required }}\n\n{% if $('PII Detection').item.json.pii_check.has_pii %}\n⚠️ WARNING: This email contains PII ({{ $('PII Detection').item.json.pii_check.types.join(', ') }})\n{% endif %}\n\n[View Original in Gmail](https://mail.google.com/mail/u/0/#inbox/{{ $('Gmail Trigger').item.json.id }})",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "forward-to-finance",
+      "name": "Forward to Finance Dept",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3100,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "channelId": "YOUR_SLACK_CHANNEL_ID",
+        "text": "=💰 **Finance/Billing Email Forwarded**\n\n**From:** {{ $('Gmail Trigger').item.json.from }}\n**Subject:** {{ $('Gmail Trigger').item.json.subject }}\n**Priority:** {{ $('Summarize for Finance (Claude)').item.json.message.content.priority }}\n\n{% if $('PII Detection').item.json.pii_check.has_pii %}\n⚠️ Contains PII: {{ $('PII Detection').item.json.pii_check.types.join(', ') }}\n{% endif %}\n\nForwarded to finance@abccorp.com",
+        "otherOptions": {}
+      },
+      "id": "notify-slack-finance",
+      "name": "Notify Slack: Finance",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        3320,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.id }}",
+        "labelIds": [
+          "NEEDS_REVIEW_LOW_CONFIDENCE"
+        ]
+      },
+      "id": "label-needs-review",
+      "name": "Label: Needs Review (Low Confidence)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1780,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "channelId": "YOUR_SLACK_CHANNEL_ID",
+        "text": "=⚠️ **Email Needs Manual Review**\n\n**Reason:** {% if $('Confidence Gate (>90% + No Escalation)').item.json.message.content.confidence_score < 90 %}Low confidence ({{ $('Classification with Confidence (Claude)').item.json.message.content.confidence_score }}%){% endif %}{% if $('Sentiment Analysis (Claude)').item.json.message.content.escalation_needed %} + Escalation needed ({{ $('Sentiment Analysis (Claude)').item.json.message.content.escalation_reason }}){% endif %}\n\n**From:** {{ $('Gmail Trigger').item.json.from }}\n**Subject:** {{ $('Gmail Trigger').item.json.subject }}\n\n**AI Classification:** {{ $('Classification with Confidence (Claude)').item.json.message.content.category }}\n**Sentiment:** {{ $('Sentiment Analysis (Claude)').item.json.message.content.sentiment }}\n**Issues Detected:** {{ $('Sentiment Analysis (Claude)').item.json.message.content.detected_issues.join(', ') }}\n\n[View in Gmail](https://mail.google.com/mail/u/0/#inbox/{{ $('Gmail Trigger').item.json.id }})",
+        "otherOptions": {}
+      },
+      "id": "notify-needs-review",
+      "name": "Notify Slack: Needs Review",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        2000,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.id }}",
+        "labelIds": [
+          "SPAM_QUARANTINE"
+        ]
+      },
+      "id": "quarantine-spam",
+      "name": "Quarantine Spam",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        680,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "channelId": "YOUR_SLACK_CHANNEL_ID",
+        "text": "=🚫 **Spam/Phishing Email Quarantined**\n\n**From:** {{ $json.from }}\n**Subject:** {{ $json.subject }}\n**Reason:** {{ $json.spam_check.reason }}\n\n[View in Gmail](https://mail.google.com/mail/u/0/#inbox/{{ $json.id }})",
+        "otherOptions": {}
+      },
+      "id": "notify-spam",
+      "name": "Notify Slack: Spam Detected",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "insert",
+        "table": "email_audit_log",
+        "dataMode": "defineInNode",
+        "fieldsUi": {
+          "field": [
+            {
+              "fieldId": "email_id",
+              "fieldValue": "={{ $('Gmail Trigger').item.json.id }}"
+            },
+            {
+              "fieldId": "thread_id",
+              "fieldValue": "={{ $('Gmail Trigger').item.json.threadId }}"
+            },
+            {
+              "fieldId": "from_email",
+              "fieldValue": "={{ $('Gmail Trigger').item.json.from }}"
+            },
+            {
+              "fieldId": "subject",
+              "fieldValue": "={{ $('Gmail Trigger').item.json.subject }}"
+            },
+            {
+              "fieldId": "category",
+              "fieldValue": "={{ $('Classification with Confidence (Claude)').item.json.message.content.category }}"
+            },
+            {
+              "fieldId": "confidence_score",
+              "fieldValue": "={{ $('Classification with Confidence (Claude)').item.json.message.content.confidence_score }}"
+            },
+            {
+              "fieldId": "sentiment",
+              "fieldValue": "={{ $('Sentiment Analysis (Claude)').item.json.message.content.sentiment }}"
+            },
+            {
+              "fieldId": "escalation_needed",
+              "fieldValue": "={{ $('Sentiment Analysis (Claude)').item.json.message.content.escalation_needed }}"
+            },
+            {
+              "fieldId": "action_taken",
+              "fieldValue": "={{ $json.action }}"
+            },
+            {
+              "fieldId": "processed_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "log-to-supabase",
+      "name": "Log to Audit Trail (Supabase)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        3320,
+        140
+      ],
+      "notes": "Logs all AI decisions for review and learning"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Spam/Phishing Detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spam/Phishing Detection": {
+      "main": [
+        [
+          {
+            "node": "Spam Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spam Gate": {
+      "main": [
+        [
+          {
+            "node": "Get Email Thread History",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quarantine Spam",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Thread History": {
+      "main": [
+        [
+          {
+            "node": "Get Thread Messages",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Lookup Sender History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Thread Messages": {
+      "main": [
+        [
+          {
+            "node": "Sentiment Analysis (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Sender History": {
+      "main": [
+        [
+          {
+            "node": "Sentiment Analysis (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sentiment Analysis (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Classification with Confidence (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classification with Confidence (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Confidence Gate (>90% + No Escalation)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confidence Gate (>90% + No Escalation)": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label: Needs Review (Low Confidence)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit Check": {
+      "main": [
+        [
+          {
+            "node": "Route: High Priority",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Route: Customer Support",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Route: Promotions",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Route: Finance/Billing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: High Priority": {
+      "main": [
+        [
+          {
+            "node": "Label: High Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Customer Support": {
+      "main": [
+        [
+          {
+            "node": "Label: Customer Support (Pending)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Promotions": {
+      "main": [
+        [
+          {
+            "node": "Label: Promotions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Finance/Billing": {
+      "main": [
+        [
+          {
+            "node": "Label: Finance/Billing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label: High Priority": {
+      "main": [
+        [
+          {
+            "node": "Draft High Priority Response (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft High Priority Response (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Create Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Draft": {
+      "main": [
+        [
+          {
+            "node": "Notify Slack: High Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Slack: High Priority": {
+      "main": [
+        [
+          {
+            "node": "Log to Audit Trail (Supabase)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label: Customer Support (Pending)": {
+      "main": [
+        [
+          {
+            "node": "Draft Support Response (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft Support Response (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Slack Approval: Customer Support",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label: Promotions": {
+      "main": [
+        [
+          {
+            "node": "Analyze Promotion (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Promotion (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Notify Slack: Promotions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label: Finance/Billing": {
+      "main": [
+        [
+          {
+            "node": "PII Detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "PII Detection": {
+      "main": [
+        [
+          {
+            "node": "Summarize for Finance (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize for Finance (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Forward to Finance Dept",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forward to Finance Dept": {
+      "main": [
+        [
+          {
+            "node": "Notify Slack: Finance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label: Needs Review (Low Confidence)": {
+      "main": [
+        [
+          {
+            "node": "Notify Slack: Needs Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quarantine Spam": {
+      "main": [
+        [
+          {
+            "node": "Notify Slack: Spam Detected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "v2.0-alpha",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "inbox-management-v2"
+  },
+  "id": "InboxManagementV2Enhanced",
+  "tags": ["email-automation", "ai-triage", "claude", "production-ready"]
+}

@@ -1,0 +1,70 @@
+# Sensitive Data - DO NOT COMMIT
+*.env
+*.env.local
+*.env.production
+.env.*
+credentials.json
+secrets.json
+config.local.json
+
+# API Keys & Tokens
+**/api-keys.txt
+**/tokens.txt
+**/*_token.txt
+**/*_key.txt
+
+# n8n Specific
+.n8n/
+n8n-data/
+**/credentials/
+**/*.credentials.json
+
+# Claude Settings (may contain sensitive data)
+.claude/settings.local.json
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node modules (if you add any Node.js tooling)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# Testing
+test-emails/
+*.test.json
+
+# Personal notes (if any)
+PERSONAL_NOTES.md
+TODO_PRIVATE.md
