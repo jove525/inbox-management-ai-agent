@@ -363,7 +363,7 @@ Contributions welcome! Please:
 
 ## License
 
-[Your License Here - e.g., MIT]
+MIT — see [LICENSE](LICENSE).
 
 ## Credits
 
