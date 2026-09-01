@@ -52,7 +52,10 @@ v2.0 is a complete rewrite focused on **safety, accuracy, and intelligence**:
    ```
 
 2. **Import workflow to n8n**
-   - Download `workflows/v2.0-inbox-management-improved.json`
+   - Download `workflows/v2.0-inbox-management-FIXED.json` (uses direct HTTP
+     Request nodes to call Claude — see WORKFLOW_FIX_NOTES.md for why this
+     replaced the original LangChain sub-node version, which n8n can't run
+     standalone)
    - Import into n8n
    - Configure credentials
 
@@ -207,10 +210,12 @@ Update in "Rate Limit Check" function node.
 ```
 inbox-management-improved/
 ├── workflows/
-│   ├── v2.0-inbox-management-improved.json  ← Main workflow
+│   ├── v2.0-inbox-management-FIXED.json     ← Main workflow (use this one)
+│   ├── v2.0-inbox-management-improved.json  ← Pre-fix version, kept for reference
 │   └── archive/
 │       ├── v1.0-original.json               ← Original for reference
 │       └── v1.0-workflow-diagram.png
+├── WORKFLOW_FIX_NOTES.md                    ← LangChain -> HTTP node fix writeup
 ├── docs/
 │   ├── SETUP.md                             ← Complete setup guide
 │   ├── V1_VS_V2_COMPARISON.md               ← Feature comparison
